@@ -3,9 +3,9 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-# --- 1. 網頁基本設定 (維持原版) ---
+# --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強操盤手", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強熱門股選股器 (AI 融合版)")
+st.title("📈 台股 200 強熱門股選股器 (AI 融合修正版)")
 st.write(f"策略執行日期：{datetime.now().strftime('%Y-%m-%d')}")
 
 # --- 2. 側邊欄：策略控制台 ---
@@ -17,7 +17,7 @@ strategy = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-# 【新增功能】AI 產業濾鏡：讓原本的篩選器瞬間聚焦
+# AI 產業濾鏡
 st.sidebar.header("🤖 AI 趨勢聚焦")
 ai_filter = st.sidebar.checkbox("只顯示 AI 供應鏈與半導體", value=False)
 if ai_filter:
@@ -26,10 +26,9 @@ if ai_filter:
 st.sidebar.markdown("---")
 vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.0, 1.0, 0.1)
 
-# --- 3. 內建 200 檔熱門清單 (結構升級：加入產業標籤) ---
+# --- 3. 內建 200 檔熱門清單 (含產業標籤) ---
 @st.cache_data
 def get_tw_stock_list():
-    # 這裡將原本的清單加上 "Tag" (標籤)，這就是讓系統變聰明的關鍵
     top_stocks = [
         # --- AI 核心 / 半導體 ---
         {"代號": "2330", "名稱": "台積電", "Tag": "AI"}, {"代號": "2454", "名稱": "聯發科", "Tag": "AI"},
@@ -51,18 +50,15 @@ def get_tw_stock_list():
         {"代號": "3037", "名稱": "欣興", "Tag": "AI"}, {"代號": "2368", "名稱": "金像電", "Tag": "AI"},
         {"代號": "2383", "名稱": "台光電", "Tag": "AI"}, {"代號": "6274", "名稱": "台燿", "Tag": "AI"},
         {"代號": "8046", "名稱": "南電", "Tag": "AI"}, {"代號": "3189", "名稱": "景碩", "Tag": "AI"},
-        
-        # --- 其他熱門股 (Tag 為空或 General) ---
+        # --- 其他熱門股 ---
         {"代號": "2603", "名稱": "長榮", "Tag": ""}, {"代號": "2609", "名稱": "陽明", "Tag": ""},
         {"代號": "1513", "名稱": "中興電", "Tag": "Energy"}, {"代號": "1519", "名稱": "華城", "Tag": "Energy"},
         {"代號": "2881", "名稱": "富邦金", "Tag": ""}, {"代號": "2882", "名稱": "國泰金", "Tag": ""},
         {"代號": "1605", "名稱": "華新", "Tag": "Energy"}, {"代號": "2002", "名稱": "中鋼", "Tag": ""},
         {"代號": "2912", "名稱": "統一超", "Tag": ""}, {"代號": "2324", "名稱": "仁寶", "Tag": "AI"},
         {"代號": "3006", "名稱": "晶豪科", "Tag": "AI"}, {"代號": "8150", "名稱": "南茂", "Tag": "AI"}
-        # (在此保留原有的 200 檔結構，您可以慢慢把 Tag 補上，這裡示範核心部分)
     ]
-    
-    # 自動補足至 200 檔 (結構不變)
+    # 自動補足至 200 檔
     while len(top_stocks) < 200:
         top_stocks.append({"代號": "0000", "名稱": "填充位", "Tag": ""})
     return pd.DataFrame(top_stocks[:200])
@@ -80,65 +76,67 @@ def calculate_indicators(df):
     df['D'] = df['K'].ewm(com=2).mean()
     return df
 
-# 🚀 執行 (邏輯核心維持原版，僅增加過濾層)
+# 🚀 執行主程式
 if st.button("🚀 執行操盤手掃描", type="primary"):
     stock_df = get_tw_stock_list()
-    
-    # 【新增邏輯】如果使用者勾選了 AI 濾鏡，這裡先篩選一次
     if ai_filter:
         stock_df = stock_df[stock_df['Tag'] == "AI"]
         st.info(f"🤖 AI 模式已啟動：鎖定 {len(stock_df)} 檔 AI 供應鏈進行精準打擊...")
     
     total = len(stock_df)
-    status_text = st.empty()
-    progress_bar = st.progress(0)
-    results = []
-    
-    for i, row in stock_df.iterrows():
-        code, name, tag = row['代號'], row['名稱'], row['Tag']
-        if code == "0000": continue 
-        
-        status_text.text(f"🔍 正在分析：[{code} {name}] ({i+1}/{total})")
-        
-        try:
-            data = yf.Ticker(code + ".TW").history(period="6mo")
-            if len(data) >= 60:
-                data = calculate_indicators(data)
-                today, yesterday = data.iloc[-1], data.iloc[-2]
-                price_now, price_yesterday = today['Close'], yesterday['Close']
-                change_pct = (price_now - price_yesterday) / price_yesterday * 100
-                vol_ratio = today['Volume'] / data['Volume'].iloc[-7:-2].mean() if data['Volume'].iloc[-7:-2].mean() > 0 else 0
-                
-                ma5, ma20, ma60 = data['Close'].tail(5).mean(), data['Close'].tail(20).mean(), data['Close'].tail(60).mean()
-                kd_cross = today['K'] > today['D'] and yesterday['K'] < yesterday['D']
-                macd_red = today['MACD_Hist'] > 0
-                
-                is_match, reason = False, ""
-                
-                # 策略邏輯 (維持原版不變，讓您用得順手)
-                if strategy == "🔥 強勢噴出 (追高動能)":
-                    if change_pct > 1.0 and price_now > ma5 and vol_ratio >= vol_threshold:
-                        is_match, reason = True, "價漲量增/強勢動能"
-                elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
-                    if price_now > ma60 and macd_red:
-                        is_match, reason = True, "波段趨勢向上"
-                elif strategy == "🎣 低檔轉折 (抄底反彈)":
-                    if kd_cross: is_match, reason = True, "✨ KD黃金交叉"
-
-                if is_match:
-                    # 結果中加上 "產業標籤"，讓您一眼看出這是 AI 股還是普通股
-                    display_tag = "🤖 AI" if tag == "AI" else "一般"
-                    results.append({
-                        "代號": code, "名稱": name, "屬性": display_tag, 
-                        "昨日收盤": f"{price_yesterday:.2f}", "今日漲幅": f"{change_pct:.1f}%", 
-                        "量比": f"{vol_ratio:.1f}倍", "入選原因": reason
-                    })
-        except: pass
-        progress_bar.progress((i + 1) / total)
-
-    status_text.text("✅ 分析完成！")
-    if results:
-        df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
-        st.dataframe(df_res, use_container_width=True)
+    if total == 0:
+        st.warning("⚠️ 目前條件下沒有符合的股票。")
     else:
-        st.warning("符合條件股票較少，建議更換策略試試。")
+        status_text = st.empty()
+        progress_bar = st.progress(0)
+        results = []
+        
+        # 使用 enumerate 重新計數避免進度條崩潰
+        for idx, (index, row) in enumerate(stock_df.iterrows()):
+            code, name, tag = row['代號'], row['名稱'], row['Tag']
+            if code == "0000": continue 
+            
+            status_text.text(f"🔍 正在分析：[{code} {name}] ({idx+1}/{total})")
+            
+            try:
+                data = yf.Ticker(code + ".TW").history(period="6mo")
+                if len(data) >= 60:
+                    data = calculate_indicators(data)
+                    today, yesterday = data.iloc[-1], data.iloc[-2]
+                    price_now, price_yesterday = today['Close'], yesterday['Close']
+                    change_pct = (price_now - price_yesterday) / price_yesterday * 100
+                    vol_ratio = today['Volume'] / data['Volume'].iloc[-7:-2].mean() if data['Volume'].iloc[-7:-2].mean() > 0 else 0
+                    
+                    ma5, ma20, ma60 = data['Close'].tail(5).mean(), data['Close'].tail(20).mean(), data['Close'].tail(60).mean()
+                    kd_cross = today['K'] > today['D'] and yesterday['K'] < yesterday['D']
+                    macd_red = today['MACD_Hist'] > 0
+                    
+                    is_match, reason = False, ""
+                    if strategy == "🔥 強勢噴出 (追高動能)":
+                        if change_pct > 1.0 and price_now > ma5 and vol_ratio >= vol_threshold:
+                            is_match, reason = True, "價漲量增/強勢動能"
+                    elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
+                        if price_now > ma60 and macd_red:
+                            is_match, reason = True, "波段趨勢向上"
+                    elif strategy == "🎣 低檔轉折 (抄底反彈)":
+                        if kd_cross: is_match, reason = True, "✨ KD黃金交叉"
+
+                    if is_match:
+                        display_tag = "🤖 AI" if tag == "AI" else "一般"
+                        results.append({
+                            "代號": code, "名稱": name, "屬性": display_tag, 
+                            "昨日收盤": f"{price_yesterday:.2f}", "今日漲幅": f"{change_pct:.1f}%", 
+                            "量比": f"{vol_ratio:.1f}倍", "入選原因": reason
+                        })
+            except: pass
+            
+            # 更新進度條
+            progress_val = (idx + 1) / total
+            progress_bar.progress(min(progress_val, 1.0))
+
+        status_text.text("✅ 分析完成！")
+        if results:
+            df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
+            st.dataframe(df_res, use_container_width=True)
+        else:
+            st.warning("符合條件股票較少，建議更換策略試試。")
