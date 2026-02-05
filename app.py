@@ -1,147 +1,148 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
 from datetime import datetime
 
 # --- 1. 網頁基本設定 ---
-st.set_page_config(page_title="台股 200 強操盤手", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強熱門股選股器")
-st.write(f"策略執行日期：{datetime.now().strftime('%Y-%m-%d')}")
+st.set_page_config(page_title="台股 AI 趨勢監控", page_icon="🤖", layout="wide")
+st.title("🤖 台股 AI 趨勢監控 (即時價格版)")
+st.write(f"系統更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# --- 2. 側邊欄：策略控制台 ---
-st.sidebar.header("🎯 請選擇操盤策略")
+# --- 2. 側邊欄設定 ---
+st.sidebar.header("🎯 策略控制台")
+industry_filter = st.sidebar.selectbox(
+    "📊 鎖定產業板塊",
+    ("全部顯示", "🤖 AI 伺服器/組裝", "🔥 散熱與機殼", "⚡ 重電與綠能", "🚢 航運與傳產", "💎 半導體與 IC 設計")
+)
+st.sidebar.markdown("---")
 strategy = st.sidebar.radio(
-    "您今天想找什麼股票？",
+    "📈 選擇操盤策略",
     ("🔥 強勢噴出 (追高動能)", "🛡️ 波段多頭 (穩健趨勢)", "🎣 低檔轉折 (抄底反彈)")
 )
-
-st.sidebar.markdown("---")
 vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.0, 1.0, 0.1)
 
-# --- 3. 內建 200 檔熱門清單 ---
+# --- 3. 股票清單與產業分類 ---
 @st.cache_data
 def get_tw_stock_list():
-    # 擴充至 200 檔台股熱門標的
-    top_stocks = [
+    data = [
+        # AI 伺服器/組裝
+        {"代號": "2317", "名稱": "鴻海", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "2382", "名稱": "廣達", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "3231", "名稱": "緯創", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "6669", "名稱": "緯穎", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "2376", "名稱": "技嘉", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "2356", "名稱": "英業達", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "2368", "名稱": "金像電", "產業": "🤖 AI 伺服器/組裝"},
+        {"代號": "2383", "名稱": "台光電", "產業": "🤖 AI 伺服器/組裝"},
+        
+        # 散熱與機殼
+        {"代號": "3017", "名稱": "奇鋐", "產業": "🔥 散熱與機殼"},
+        {"代號": "3324", "名稱": "雙鴻", "產業": "🔥 散熱與機殼"},
+        {"代號": "2421", "名稱": "建準", "產業": "🔥 散熱與機殼"},
+        {"代號": "3013", "名稱": "晟銘電", "產業": "🔥 散熱與機殼"},
+        {"代號": "8996", "名稱": "高力", "產業": "🔥 散熱與機殼"},
+
         # 半導體/IC設計
-        {"代號": "2330", "名稱": "台積電"}, {"代號": "2454", "名稱": "聯發科"}, {"代號": "2303", "名稱": "聯電"},
-        {"代號": "3711", "名稱": "日月光"}, {"代號": "3034", "名稱": "聯詠"}, {"代號": "2379", "名稱": "瑞昱"},
-        {"代號": "3443", "名稱": "創意"}, {"代號": "3661", "名稱": "世芯-KY"}, {"代號": "3035", "名稱": "智原"},
-        {"代號": "3006", "名稱": "晶豪科"}, {"代號": "8150", "名稱": "南茂"}, {"代號": "2408", "名稱": "南亞科"},
-        {"代號": "2344", "名稱": "華邦電"}, {"代號": "5347", "名稱": "世界"}, {"代號": "6488", "名稱": "環球晶"},
-        {"代號": "5483", "名稱": "中美晶"}, {"代號": "6147", "名稱": "頎邦"}, {"代號": "6239", "名稱": "力成"},
-        {"代號": "8299", "名稱": "群聯"}, {"代號": "3105", "名稱": "穩懋"}, {"代號": "2369", "名稱": "菱生"},
-        {"代號": "6271", "名稱": "同欣電"}, {"代號": "2449", "名稱": "京元電子"}, {"代號": "3376", "名稱": "新日興"},
-        {"代號": "3532", "名稱": "台勝科"}, {"代號": "4961", "名稱": "天鈺"}, {"代號": "4966", "名稱": "譜瑞-KY"},
-        {"代號": "6415", "名稱": "矽力-KY"}, {"代號": "8016", "名稱": "矽創"}, {"代號": "8081", "名稱": "致新"},
-        # AI/伺服器/散熱
-        {"代號": "2317", "名稱": "鴻海"}, {"代號": "2382", "名稱": "廣達"}, {"代號": "3231", "名稱": "緯創"},
-        {"代號": "6669", "名稱": "緯穎"}, {"代號": "2376", "名稱": "技嘉"}, {"代號": "2356", "名稱": "英業達"},
-        {"代號": "2324", "名稱": "仁寶"}, {"代號": "2357", "名稱": "華碩"}, {"代號": "4938", "名稱": "和碩"},
-        {"代號": "2353", "名稱": "宏碁"}, {"代號": "3017", "名稱": "奇鋐"}, {"代號": "3324", "名稱": "雙鴻"},
-        {"代號": "2421", "名稱": "建準"}, {"代號": "3653", "名稱": "健策"}, {"代號": "6230", "名稱": "超眾"},
-        {"代號": "3013", "名稱": "晟銘電"}, {"代號": "2301", "名稱": "光寶科"}, {"代號": "2387", "名稱": "精元"},
-        {"代號": "6125", "名稱": "廣運"}, {"代號": "8996", "名稱": "高力"}, {"代號": "3515", "名稱": "華擎"},
-        # 網通/PCB/光通訊
-        {"代號": "3037", "名稱": "欣興"}, {"代號": "2368", "名稱": "金像電"}, {"代號": "2383", "名稱": "台光電"},
-        {"代號": "6274", "名稱": "台燿"}, {"代號": "8046", "名稱": "南電"}, {"代號": "3189", "名稱": "景碩"},
-        {"代號": "2313", "名稱": "華通"}, {"代號": "2345", "名稱": "智邦"}, {"代號": "6285", "名稱": "啟碁"},
-        {"代號": "5388", "名稱": "中磊"}, {"代號": "3491", "名稱": "昇達科"}, {"代號": "2314", "名稱": "台揚"},
-        {"代號": "3163", "名稱": "波若威"}, {"代號": "3363", "名稱": "上詮"}, {"代號": "4979", "名稱": "華星光"},
-        {"代號": "6442", "名稱": "光聖"}, {"代號": "4977", "名稱": "眾達-KY"}, {"代號": "8089", "名稱": "康全電訊"},
-        {"代號": "2360", "名稱": "致茂"}, {"代號": "6213", "名稱": "聯茂"}, {"代號": "3044", "名稱": "健鼎"},
-        # 重電/綠能/塑化/鋼鐵
-        {"代號": "1513", "名稱": "中興電"}, {"代號": "1519", "名稱": "華城"}, {"代號": "1503", "名稱": "士電"},
-        {"代號": "1504", "名稱": "東元"}, {"代號": "1605", "名稱": "華新"}, {"代號": "1514", "名稱": "亞力"},
-        {"代號": "6806", "名稱": "森崴能源"}, {"代號": "9958", "名稱": "世紀鋼"}, {"代號": "1101", "名稱": "台泥"},
-        {"代號": "1102", "名稱": "亞泥"}, {"代號": "1301", "名稱": "台塑"}, {"代號": "1303", "名稱": "南亞"},
-        {"代號": "1326", "名稱": "台化"}, {"代號": "6505", "名稱": "台塑化"}, {"代號": "2002", "名稱": "中鋼"},
-        {"代號": "2014", "名稱": "中鴻"}, {"代號": "2031", "名稱": "新光鋼"}, {"代號": "2603", "名稱": "長榮"},
-        # 航運/航空/觀光/貿易
-        {"代號": "2609", "名稱": "陽明"}, {"代號": "2615", "名稱": "萬海"}, {"代號": "2618", "名稱": "長榮航"},
-        {"代號": "2610", "名稱": "華航"}, {"代號": "2637", "名稱": "慧洋-KY"}, {"代號": "2606", "名稱": "裕民"},
-        {"代號": "2707", "名稱": "晶華"}, {"代號": "2731", "名稱": "雄獅"}, {"代號": "5907", "名稱": "大洋-KY"},
-        {"代號": "2912", "名稱": "統一超"}, {"代號": "5903", "名稱": "全家"}, {"代號": "1216", "名稱": "統一"},
-        # 金融股
-        {"代號": "2881", "名稱": "富邦金"}, {"代號": "2882", "名稱": "國泰金"}, {"代號": "2891", "名稱": "中信金"},
-        {"代號": "2886", "名稱": "兆豐金"}, {"代號": "2884", "名稱": "玉山金"}, {"代號": "2885", "名稱": "元大金"},
-        {"代號": "5880", "名稱": "合庫金"}, {"代號": "2892", "名稱": "第一金"}, {"代號": "2880", "名稱": "華南金"},
-        {"代號": "2883", "名稱": "開發金"}, {"代號": "2887", "名稱": "台新金"}, {"代號": "2890", "名稱": "永豐金"},
-        {"代號": "2888", "名稱": "新光金"}, {"代號": "2801", "名稱": "彰銀"}, {"代號": "5871", "名稱": "中租-KY"},
-        # 其他熱門/機器人/生技
-        {"代號": "2308", "名稱": "台達電"}, {"代號": "3008", "名稱": "大立光"}, {"代號": "2359", "名稱": "所羅門"},
-        {"代號": "2365", "名稱": "昆盈"}, {"代號": "8367", "名稱": "建達"}, {"代號": "4562", "名稱": "穎漢"},
-        {"代號": "3293", "名稱": "鈊象"}, {"代號": "8069", "名稱": "元太"}, {"代號": "1760", "名稱": "寶齡富錦"},
-        {"代號": "1795", "名稱": "美時"}, {"代號": "4147", "名稱": "龍巖"}, {"代號": "6472", "名稱": "保瑞"},
-        {"代號": "4763", "名稱": "材料-KY"}, {"代號": "2412", "名稱": "中華電"}, {"代號": "3045", "名稱": "台灣大"}
+        {"代號": "2330", "名稱": "台積電", "產業": "💎 半導體與 IC 設計"},
+        {"代號": "2454", "名稱": "聯發科", "產業": "💎 半導體與 IC 設計"},
+        {"代號": "3443", "名稱": "創意", "產業": "💎 半導體與 IC 設計"},
+        {"代號": "3661", "名稱": "世芯-KY", "產業": "💎 半導體與 IC 設計"},
+        {"代號": "3035", "名稱": "智原", "產業": "💎 半導體與 IC 設計"},
+
+        # 重電與綠能
+        {"代號": "1513", "名稱": "中興電", "產業": "⚡ 重電與綠能"},
+        {"代號": "1519", "名稱": "華城", "產業": "⚡ 重電與綠能"},
+        {"代號": "1503", "名稱": "士電", "產業": "⚡ 重電與綠能"},
+
+        # 航運與傳產
+        {"代號": "2603", "名稱": "長榮", "產業": "🚢 航運與傳產"},
+        {"代號": "2609", "名稱": "陽明", "產業": "🚢 航運與傳產"},
+        {"代號": "2618", "名稱": "長榮航", "產業": "🚢 航運與傳產"}
     ]
-    # 為節省篇幅，此處僅列出核心代表，代碼內部已透過邏輯擴充或可自行補足至 200 檔
-    # 實際運作時會確保 list 長度為 200
-    while len(top_stocks) < 200:
-        top_stocks.append({"代號": "0000", "名稱": "填充位"}) # 示意，實際代碼請放入正確清單
-    return pd.DataFrame(top_stocks[:200])
+    # 此處可繼續增加至 100-200 檔
+    return pd.DataFrame(data)
 
 def calculate_indicators(df):
     exp12 = df['Close'].ewm(span=12, adjust=False).mean()
     exp26 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['DIF'] = exp12 - exp26
-    df['DEA'] = df['DIF'].ewm(span=9, adjust=False).mean()
-    df['MACD_Hist'] = (df['DIF'] - df['DEA']) * 2
-    low_min = df['Low'].rolling(window=9).min()
-    high_max = df['High'].rolling(window=9).max()
-    df['RSV'] = (df['Close'] - low_min) / (high_max - low_min) * 100
-    df['K'] = df['RSV'].ewm(com=2).mean()
+    df['MACD_Hist'] = (exp12 - exp26 - (exp12 - exp26).ewm(span=9, adjust=False).mean()) * 2
+    low_min, high_max = df['Low'].rolling(9).min(), df['High'].rolling(9).max()
+    df['K'] = ((df['Close'] - low_min) / (high_max - low_min) * 100).ewm(com=2).mean()
     df['D'] = df['K'].ewm(com=2).mean()
     return df
 
-# 🚀 執行
-if st.button("🚀 執行 200 檔深度掃描", type="primary"):
-    stock_df = get_tw_stock_list()
-    total = len(stock_df)
+def plot_candlestick(df, title):
+    fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線')])
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(20).mean(), mode='lines', name='月線(20MA)', line=dict(color='orange', width=1.5)))
+    fig.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0), template="plotly_dark")
+    return fig
+
+# --- 4. 執行掃描 ---
+if st.button("🚀 執行即時趨勢掃描", type="primary"):
+    df_list = get_tw_stock_list()
+    if industry_filter != "全部顯示":
+        df_list = df_list[df_list['產業'] == industry_filter]
     
-    status_text = st.empty() # 建立一個空欄位用來顯示「正在分析哪一間」
+    st.info(f"🔍 正在同步最新價格，掃描 **{industry_filter}** 板塊...")
+    
+    status_text = st.empty()
     progress_bar = st.progress(0)
     results = []
     
-    for i, row in stock_df.iterrows():
-        code, name = row['代號'], row['名稱']
-        if code == "0000": continue # 跳過填充位
-        
-        # --- 顯示實時提示 (1/200) ---
-        status_text.text(f"🔍 正在分析：[{code} {name}] ({i+1}/{total})")
+    for i, row in df_list.iterrows():
+        code, name, industry = row['代號'], row['名稱'], row['產業']
+        status_text.text(f"分析中：[{code} {name}] ({i+1}/{len(df_list)})")
         
         try:
+            # 獲取 6 個月歷史數據
             data = yf.Ticker(code + ".TW").history(period="6mo")
             if len(data) >= 60:
                 data = calculate_indicators(data)
                 today, yesterday = data.iloc[-1], data.iloc[-2]
-                price_now, price_yesterday = today['Close'], yesterday['Close']
-                change_pct = (price_now - price_yesterday) / price_yesterday * 100
-                vol_ratio = today['Volume'] / data['Volume'].iloc[-7:-2].mean() if data['Volume'].iloc[-7:-2].mean() > 0 else 0
                 
-                ma5, ma20, ma60 = data['Close'].tail(5).mean(), data['Close'].tail(20).mean(), data['Close'].tail(60).mean()
+                # --- 價格資訊 ---
+                price_prev = yesterday['Close']  # 昨日收盤
+                price_now = today['Close']      # 最新價格 (即時或今日收盤)
+                change_pct = (price_now - price_prev) / price_prev * 100
+                
+                vol_ratio = today['Volume'] / data['Volume'].iloc[-7:-2].mean()
+                ma5, ma60 = data['Close'].tail(5).mean(), data['Close'].tail(60).mean()
                 kd_cross = today['K'] > today['D'] and yesterday['K'] < yesterday['D']
                 macd_red = today['MACD_Hist'] > 0
                 
-                is_match, reason = False, ""
+                match, reason = False, ""
                 if strategy == "🔥 強勢噴出 (追高動能)":
-                    if change_pct > 1.0 and price_now > ma5 and vol_ratio >= vol_threshold:
-                        is_match, reason = True, "價漲量增/強勢動能"
+                    if change_pct > 0.5 and price_now > ma5 and vol_ratio >= vol_threshold:
+                        match, reason = True, "強勢動能/爆量起漲"
                 elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
                     if price_now > ma60 and macd_red:
-                        is_match, reason = True, "波段趨勢向上"
+                        match, reason = True, "波段向上/站穩季線"
                 elif strategy == "🎣 低檔轉折 (抄底反彈)":
-                    if kd_cross: is_match, reason = True, "✨ KD黃金交叉"
+                    if kd_cross: match, reason = True, "低檔金叉/起漲轉折"
 
-                if is_match:
-                    results.append({"代號": code, "名稱": name, "昨日收盤": f"{price_yesterday:.2f}", 
-                                    "今日漲幅": f"{change_pct:.1f}%", "量比": f"{vol_ratio:.1f}倍", "入選原因": reason})
+                if match:
+                    results.append({
+                        "代號": code, "名稱": name, "產業": industry,
+                        "昨日收盤": f"{price_prev:.2f}",
+                        "最新價格": f"{price_now:.2f}", # 新增最新價格
+                        "今日漲幅": f"{change_pct:.1f}%",
+                        "量比": f"{vol_ratio:.1f}倍",
+                        "AI簡評": reason, "raw_data": data
+                    })
         except: pass
-        progress_bar.progress((i + 1) / total)
-
-    status_text.text("✅ 分析完成！")
+        progress_bar.progress((i + 1) / len(df_list))
+    
+    status_text.empty()
     if results:
-        df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
-        st.dataframe(df_res, use_container_width=True)
+        st.success(f"✅ 發現 {len(results)} 檔標的")
+        # 將結果轉換為 DataFrame 並顯示
+        df_display = pd.DataFrame(results).drop(columns=['raw_data'])
+        st.dataframe(df_display, use_container_width=True)
+        
+        # 顯示詳細 K 線
+        for item in results:
+            with st.expander(f"📊 {item['代號']} {item['名稱']} | 最新：{item['最新價格']} ({item['今日漲幅']})"):
+                st.plotly_chart(plot_candlestick(item['raw_data'], f"{item['名稱']} 即時趨勢圖"), use_container_width=True)
     else:
-        st.warning("符合條件股票較少，建議更換策略試試。")
+        st.warning("目前市場狀況無符合標的。")
