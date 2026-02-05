@@ -15,7 +15,6 @@ def get_market_data():
             data = yf.Ticker(symbol).history(period="2d")
             if len(data) >= 2:
                 change = (data.iloc[-1]['Close'] - data.iloc[-2]['Close']) / data.iloc[-2]['Close'] * 100
-                color = "green" if change >= 0 else "red" # 綠漲紅跌 (美股慣例，可視需求調整)
                 st.sidebar.metric(name, f"{data.iloc[-1]['Close']:,.0f}", f"{change:.2f}%")
         except: pass
 get_market_data()
@@ -77,81 +76,69 @@ def get_tw_stock_list():
     ]
     return pd.DataFrame(top_stocks)
 
-# 輔助計算函數
+# 輔助計算技術指標
 def calculate_indicators(df):
-    # 計算 MACD
+    # MACD
     exp12 = df['Close'].ewm(span=12, adjust=False).mean()
     exp26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['DIF'] = exp12 - exp26
     df['DEA'] = df['DIF'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = (df['DIF'] - df['DEA']) * 2
     
-    # 計算 KD (9,3,3)
+    # KD (9,3,3)
     low_min = df['Low'].rolling(window=9).min()
     high_max = df['High'].rolling(window=9).max()
     df['RSV'] = (df['Close'] - low_min) / (high_max - low_min) * 100
-    df['K'] = df['RSV'].ewm(com=2).mean() # 近似值
+    df['K'] = df['RSV'].ewm(com=2).mean()
     df['D'] = df['K'].ewm(com=2).mean()
     return df
 
 if st.button("🚀 開始智慧掃描 (含技術指標)", type="primary"):
     stock_df = get_tw_stock_list()
-    st.info(f"✅ 載入 {len(stock_df)} 檔標的，正在計算 KD 與 MACD，請稍候...")
+    st.info(f"✅ 載入 {len(stock_df)} 檔標的，正在分析，請稍候...")
     
     results = []
     progress_bar = st.progress(0)
     
     for i, row in stock_df.iterrows():
         try:
-            code = row['代號']
-            name = row['名稱']
-            data = yf.Ticker(code + ".TW").history(period="6mo") # 抓長一點算技術指標才準
+            code, name = row['代號'], row['名稱']
+            data = yf.Ticker(code + ".TW").history(period="6mo")
             
             if len(data) >= 60:
                 data = calculate_indicators(data)
                 today = data.iloc[-1]
                 yesterday = data.iloc[-2]
                 
-                # 基礎數據
-                price_yesterday = yesterday['Close'] # 您的需求：顯示昨日收盤價
+                # 昨日收盤與今日數據
+                price_yesterday = yesterday['Close']
                 price_now = today['Close']
                 change_pct = (price_now - price_yesterday) / price_yesterday * 100
                 vol_ratio = today['Volume'] / data['Volume'].iloc[-7:-2].mean() if data['Volume'].iloc[-7:-2].mean() > 0 else 0
                 
-                # 均線
                 ma60 = data['Close'].tail(60).mean()
-                
-                # 技術指標訊號
-                # 1. KD 黃金交叉：今天 K > D 且 昨天 K < D
                 kd_gold = today['K'] > today['D'] and yesterday['K'] < yesterday['D']
-                # 2. MACD 多頭：柱狀體 > 0 (翻紅) 且 DIF > DEA
                 macd_bull = today['MACD_Hist'] > 0 and today['DIF'] > today['DEA']
 
-                # --- 篩選邏輯 ---
+                # 篩選判斷
                 cond_1 = change_pct >= min_increase and vol_ratio >= vol_multiplier
-                cond_2 = True
-                if check_ma60: cond_2 = price_now > ma60
-                
-                cond_3 = True
-                if check_kd_cross: cond_3 = kd_gold # 如果勾選，必須符合黃金交叉
-                
-                cond_4 = True
-                if check_macd_bull: cond_4 = macd_bull # 如果勾選，必須符合 MACD 多頭
+                cond_2 = price_now > ma60 if check_ma60 else True
+                cond_3 = kd_gold if check_kd_cross else True
+                cond_4 = macd_bull if check_macd_bull else True
 
                 if cond_1 and cond_2 and cond_3 and cond_4:
-                    # 標註符合的訊號
-                    signals = []
-                    if kd_gold: signals.append("KD金叉")
-                    if macd_bull: signals.append("MACD多頭")
-                    if price_now > ma60: signals.append("站上季線")
+                    sigs = []
+                    if kd_gold: sigs.append("KD金叉")
+                    if macd_bull: sigs.append("MACD多頭")
+                    if price_now > ma60: sigs.append("站上季線")
                     
                     results.append({
                         "代號": code,
                         "名稱": name,
-                        "昨日收盤": f"{price_yesterday:.2f}", # 修改：顯示昨日價格
+                        "昨日收盤": f"{price_yesterday:.2f}",
                         "今日漲幅": f"{change_pct:.1f}%",
                         "量比": f"{vol_ratio:.1f}倍",
-                        "技術訊號": " | ".join(signals)
+                        "技術訊號": " | ".join(sigs)
                     })
         except: pass
         progress_bar.progress((i + 1) / len(stock_df))
@@ -161,4 +148,4 @@ if st.button("🚀 開始智慧掃描 (含技術指標)", type="primary"):
         st.dataframe(pd.DataFrame(results), use_container_width=True)
     else:
         st.warning("⚠️ 目前條件下無符合股票。")
-        st.info("建議：若勾選了「KD黃金交叉」，因為條件較嚴格（必須剛好今天交叉），可能檔數較少，可試著取消該勾選以查看更多標的。")
+              
