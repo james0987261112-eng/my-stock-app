@@ -2,4 +2,3 @@ streamlit
 pandas
 pandas_datareader
 yfinance
-
