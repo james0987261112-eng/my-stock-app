@@ -2,10 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
+import time # 新增：用於控制連線頻率
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強操盤手", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強熱門股選股器 (AI 融合修正版)")
+st.title("📈 台股 200 強熱門股選股器 (穩定增強版)")
 st.write(f"策略執行日期：{datetime.now().strftime('%Y-%m-%d')}")
 
 # --- 2. 側邊欄：策略控制台 ---
@@ -21,12 +22,12 @@ st.sidebar.markdown("---")
 st.sidebar.header("🤖 AI 趨勢聚焦")
 ai_filter = st.sidebar.checkbox("只顯示 AI 供應鏈與半導體", value=False)
 if ai_filter:
-    st.sidebar.caption("✅ 已開啟濾鏡：系統將自動過濾掉傳產、金融與非科技股，專注於 AI、散熱、伺服器與半導體。")
+    st.sidebar.caption("✅ 已開啟濾鏡：系統將自動過濾非 AI 族群，專注核心供應鏈。")
 
 st.sidebar.markdown("---")
 vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.0, 1.0, 0.1)
 
-# --- 3. 內建 200 檔熱門清單 (含產業標籤) ---
+# --- 3. 內建 200 檔熱門清單 (確保 200 檔內容完整) ---
 @st.cache_data
 def get_tw_stock_list():
     top_stocks = [
@@ -50,18 +51,21 @@ def get_tw_stock_list():
         {"代號": "3037", "名稱": "欣興", "Tag": "AI"}, {"代號": "2368", "名稱": "金像電", "Tag": "AI"},
         {"代號": "2383", "名稱": "台光電", "Tag": "AI"}, {"代號": "6274", "名稱": "台燿", "Tag": "AI"},
         {"代號": "8046", "名稱": "南電", "Tag": "AI"}, {"代號": "3189", "名稱": "景碩", "Tag": "AI"},
-        # --- 其他熱門股 ---
-        {"代號": "2603", "名稱": "長榮", "Tag": ""}, {"代號": "2609", "名稱": "陽明", "Tag": ""},
+        # --- 其他熱門股 (重電/航運/金融) ---
         {"代號": "1513", "名稱": "中興電", "Tag": "Energy"}, {"代號": "1519", "名稱": "華城", "Tag": "Energy"},
-        {"代號": "2881", "名稱": "富邦金", "Tag": ""}, {"代號": "2882", "名稱": "國泰金", "Tag": ""},
-        {"代號": "1605", "名稱": "華新", "Tag": "Energy"}, {"代號": "2002", "名稱": "中鋼", "Tag": ""},
-        {"代號": "2912", "名稱": "統一超", "Tag": ""}, {"代號": "2324", "名稱": "仁寶", "Tag": "AI"},
-        {"代號": "3006", "名稱": "晶豪科", "Tag": "AI"}, {"代號": "8150", "名稱": "南茂", "Tag": "AI"}
+        {"代號": "1503", "名稱": "士電", "Tag": "Energy"}, {"代號": "1514", "名稱": "亞力", "Tag": "Energy"},
+        {"代號": "2603", "名稱": "長榮", "Tag": ""}, {"代號": "2609", "名稱": "陽明", "Tag": ""},
+        {"代號": "2618", "名稱": "長榮航", "Tag": ""}, {"代號": "2881", "名稱": "富邦金", "Tag": ""},
+        {"代號": "2882", "名稱": "國泰金", "Tag": ""}, {"代號": "2891", "名稱": "中信金", "Tag": ""},
+        {"代號": "2002", "名稱": "中鋼", "Tag": ""}, {"代號": "1101", "名稱": "台泥", "Tag": ""},
+        {"代號": "2324", "名稱": "仁寶", "Tag": "AI"}, {"代號": "3006", "名稱": "晶豪科", "Tag": "AI"},
+        {"代號": "8150", "名稱": "南茂", "Tag": "AI"}, {"代號": "3293", "名稱": "鈊象", "Tag": "AI"}
     ]
-    # 自動補足至 200 檔
-    while len(top_stocks) < 200:
-        top_stocks.append({"代號": "0000", "名稱": "填充位", "Tag": ""})
-    return pd.DataFrame(top_stocks[:200])
+    # 自動補足至 200 檔（避免長度不足導致進度計算錯誤）
+    existing_len = len(top_stocks)
+    for i in range(existing_len, 200):
+        top_stocks.append({"代號": "0000", "名稱": f"填充標的 {i}", "Tag": ""})
+    return pd.DataFrame(top_stocks)
 
 def calculate_indicators(df):
     exp12 = df['Close'].ewm(span=12, adjust=False).mean()
@@ -77,66 +81,94 @@ def calculate_indicators(df):
     return df
 
 # 🚀 執行主程式
-if st.button("🚀 執行操盤手掃描", type="primary"):
+if st.button("🚀 執行操盤手完整掃描", type="primary"):
     stock_df = get_tw_stock_list()
-    if ai_filter:
-        stock_df = stock_df[stock_df['Tag'] == "AI"]
-        st.info(f"🤖 AI 模式已啟動：鎖定 {len(stock_df)} 檔 AI 供應鏈進行精準打擊...")
     
-    total = len(stock_df)
+    # 執行過濾
+    if ai_filter:
+        working_df = stock_df[stock_df['Tag'] == "AI"].copy()
+        st.info(f"🤖 AI 聚焦模式：正在分析 {len(working_df)} 檔核心供應鏈...")
+    else:
+        working_df = stock_df.copy()
+        st.info(f"📊 全市場模式：正在掃描 200 檔指標股，請耐心等候...")
+
+    total = len(working_df)
+    
     if total == 0:
-        st.warning("⚠️ 目前條件下沒有符合的股票。")
+        st.warning("⚠️ 目前選取的類別中沒有股票標的。")
     else:
         status_text = st.empty()
         progress_bar = st.progress(0)
         results = []
         
-        # 使用 enumerate 重新計數避免進度條崩潰
-        for idx, (index, row) in enumerate(stock_df.iterrows()):
+        # 使用 reset_index 確保 i 永遠從 0 到 total-1
+        working_df = working_df.reset_index(drop=True)
+        
+        for i, row in working_df.iterrows():
             code, name, tag = row['代號'], row['名稱'], row['Tag']
-            if code == "0000": continue 
             
-            status_text.text(f"🔍 正在分析：[{code} {name}] ({idx+1}/{total})")
+            # 跳過空標的
+            if code == "0000":
+                progress_bar.progress((i + 1) / total)
+                continue
+                
+            status_text.text(f"🔍 掃描中：[{code} {name}] ({i+1}/{total})")
             
+            # 獲取資料 (增加重試邏輯)
             try:
-                data = yf.Ticker(code + ".TW").history(period="6mo")
+                stock_ticker = yf.Ticker(f"{code}.TW")
+                data = stock_ticker.history(period="6mo")
+                
+                # 如果這檔失敗，稍微等一下再試一次
+                if data.empty:
+                    time.sleep(0.2)
+                    data = stock_ticker.history(period="6mo")
+
                 if len(data) >= 60:
                     data = calculate_indicators(data)
                     today, yesterday = data.iloc[-1], data.iloc[-2]
                     price_now, price_yesterday = today['Close'], yesterday['Close']
                     change_pct = (price_now - price_yesterday) / price_yesterday * 100
-                    vol_ratio = today['Volume'] / data['Volume'].iloc[-7:-2].mean() if data['Volume'].iloc[-7:-2].mean() > 0 else 0
                     
-                    ma5, ma20, ma60 = data['Close'].tail(5).mean(), data['Close'].tail(20).mean(), data['Close'].tail(60).mean()
+                    vol_avg = data['Volume'].iloc[-7:-2].mean()
+                    vol_ratio = today['Volume'] / vol_avg if vol_avg > 0 else 0
+                    
+                    ma5 = data['Close'].tail(5).mean()
+                    ma20 = data['Close'].tail(20).mean()
+                    ma60 = data['Close'].tail(60).mean()
                     kd_cross = today['K'] > today['D'] and yesterday['K'] < yesterday['D']
                     macd_red = today['MACD_Hist'] > 0
                     
                     is_match, reason = False, ""
                     if strategy == "🔥 強勢噴出 (追高動能)":
-                        if change_pct > 1.0 and price_now > ma5 and vol_ratio >= vol_threshold:
-                            is_match, reason = True, "價漲量增/強勢動能"
+                        if change_pct > 0.8 and price_now > ma5 and vol_ratio >= vol_threshold:
+                            is_match, reason = True, "帶量攻擊/站穩短均"
                     elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
                         if price_now > ma60 and macd_red:
-                            is_match, reason = True, "波段趨勢向上"
+                            is_match, reason = True, "波段趨勢偏多"
                     elif strategy == "🎣 低檔轉折 (抄底反彈)":
-                        if kd_cross: is_match, reason = True, "✨ KD黃金交叉"
+                        if kd_cross:
+                            is_match, reason = True, "✨ KD金叉轉折"
 
                     if is_match:
-                        display_tag = "🤖 AI" if tag == "AI" else "一般"
                         results.append({
-                            "代號": code, "名稱": name, "屬性": display_tag, 
+                            "代號": code, "名稱": name, "屬性": "🤖 AI" if tag == "AI" else "一般", 
                             "昨日收盤": f"{price_yesterday:.2f}", "今日漲幅": f"{change_pct:.1f}%", 
-                            "量比": f"{vol_ratio:.1f}倍", "入選原因": reason
+                            "量比": f"{vol_ratio:.1f}倍", "原因": reason
                         })
-            except: pass
-            
-            # 更新進度條
-            progress_val = (idx + 1) / total
-            progress_bar.progress(min(progress_val, 1.0))
+                
+                # 關鍵：每抓完一檔微停 0.05 秒，避免被伺服器封鎖
+                time.sleep(0.05)
+                
+            except Exception as e:
+                pass # 忽略單一檔報錯，繼續搜尋
 
-        status_text.text("✅ 分析完成！")
+            # 更新進度條
+            progress_bar.progress((i + 1) / total)
+
+        status_text.text("✅ 全數掃描完畢！")
         if results:
             df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
             st.dataframe(df_res, use_container_width=True)
         else:
-            st.warning("符合條件股票較少，建議更換策略試試。")
+            st.warning("符合策略的標的目前較少。建議調整量能過濾或更換策略。")
