@@ -6,9 +6,9 @@ import time
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強戰情室", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強戰情室 (200 檔全開版)")
+st.title("📈 台股 200 強戰情室 (量能邏輯修正版)")
 st.write(f"系統執行時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("註：本清單涵蓋台股上市櫃成交量前 200 大權值與熱門股，絕無填充。")
+st.caption("註：本清單涵蓋台股 200 檔指標股。所有策略均已受「量能過濾」滑桿限制。")
 
 # --- 2. 側邊欄：策略控制台 ---
 st.sidebar.header("🎯 請選擇操盤策略")
@@ -20,11 +20,11 @@ strategy = st.sidebar.radio(
 st.sidebar.markdown("---")
 ai_filter = st.sidebar.checkbox("只顯示 AI 供應鏈", value=False)
 if ai_filter:
-    st.sidebar.caption("✅ 已開啟濾鏡：將從 200 檔中篩選出 AI、散熱、機器人等核心族群。")
+    st.sidebar.caption("✅ 已開啟濾鏡：將從 200 檔中篩選出 AI 核心族群。")
 
 vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.0, 1.0, 0.1)
 
-# --- 3. 內建熱門清單 (真實 200 檔，一檔不少) ---
+# --- 3. 內建熱門清單 (200 檔真實標的) ---
 @st.cache_data
 def get_tw_stock_list():
     top_stocks = [
@@ -122,7 +122,7 @@ def get_tw_stock_list():
         {"代號": "2014", "名稱": "中鴻", "Tag": "鋼鐵"}, {"代號": "1722", "名稱": "台肥", "Tag": "傳產"},
         {"代號": "1216", "名稱": "統一", "Tag": "傳產"},
 
-        # === 💎 其他熱門指標 (40檔，補齊 200) ===
+        # === 💎 其他熱門指標 (40檔) ===
         {"代號": "1795", "名稱": "美時", "Tag": "生技"}, {"代號": "6472", "名稱": "保瑞", "Tag": "生技"},
         {"代號": "4147", "名稱": "中裕", "Tag": "生技"}, {"代號": "1760", "名稱": "寶齡富錦", "Tag": "生技"},
         {"代號": "3293", "名稱": "鈊象", "Tag": "遊戲"}, {"代號": "5478", "名稱": "智冠", "Tag": "遊戲"},
@@ -163,7 +163,6 @@ def calculate_indicators(df):
 if st.button("🚀 執行操盤手完整掃描", type="primary"):
     stock_df = get_tw_stock_list()
     
-    # 根據 AI 濾鏡篩選工作名單 (Tag 包含 AI 即選中)
     if ai_filter:
         working_df = stock_df[stock_df['Tag'].str.contains("AI", na=False)].copy()
         st.info(f"🤖 AI 聚焦模式：正在分析 {len(working_df)} 檔核心供應鏈...")
@@ -204,30 +203,32 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
                     kd_cross = data['K'].iloc[-1] > data['D'].iloc[-1] and data['K'].iloc[-2] < data['D'].iloc[-2]
                     macd_red = data['MACD_Hist'].iloc[-1] > 0
                     
+                    # === 🎯 策略核心判斷 (修正：全面加入量能滑桿限制) ===
                     is_match, reason = False, ""
+                    
                     if strategy == "🔥 強勢噴出 (追高動能)":
                         if change_pct > 1.0 and price_now > ma5 and vol_ratio >= vol_threshold:
                             is_match, reason = True, "帶量攻擊/站穩短均"
                     elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
-                        if price_now > ma60 and macd_red:
+                        # 修正：波段策略加入量能限制
+                        if price_now > ma60 and macd_red and vol_ratio >= vol_threshold:
                             is_match, reason = True, "波段趨勢偏多"
                     elif strategy == "🎣 低檔轉折 (抄底反彈)":
-                        if kd_cross:
+                        # 修正：轉折策略加入量能限制 (此處修正可濾掉瑞智等縮量金叉標的)
+                        if kd_cross and vol_ratio >= vol_threshold:
                             is_match, reason = True, "✨ KD金叉轉折"
 
                     if is_match:
-                        # 顯示優化
                         display_tag = tag.replace("AI-", "🔥 ") if "AI-" in tag else (tag if tag else "一般")
                         results.append({
                             "代號": code, "名稱": name, "屬性": display_tag, 
-                            "昨日收盤": f"{price_yesterday:.2f}", 
                             "即時價格": f"{price_now:.2f}", 
+                            "昨日收盤": f"{price_yesterday:.2f}", 
                             "今日漲幅": f"{change_pct:.1f}%", 
                             "量比": f"{vol_ratio:.1f}倍", 
                             "原因": reason
                         })
                 
-                # 穩定掃描間隔
                 time.sleep(0.05) 
             except:
                 pass 
@@ -240,4 +241,4 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
             st.success(f"🎊 發現 {len(results)} 檔符合策略標的！")
             st.dataframe(df_res[["代號", "名稱", "屬性", "即時價格", "昨日收盤", "今日漲幅", "量比", "原因"]], use_container_width=True)
         else:
-            st.warning("目前市場符合條件標的較少。")
+            st.warning(f"目前市場符合條件標的較少 (設定量比門檻：{vol_threshold}倍)。建議調整量能過濾或更換策略。")
