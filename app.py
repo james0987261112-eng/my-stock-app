@@ -1,14 +1,15 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
+from FinMind.data import DataLoader  # 引入真實籌碼資料庫
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強戰情室", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強戰情室 (V11.0 動態解讀版)")
+st.title("📈 台股 200 強戰情室 (V13.0 真實籌碼版)")
 st.write(f"系統執行時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("註：本版本針對「原因」欄位進行動態優化，能區分攻擊、盤整與回檔訊號。")
+st.caption("註：本版本串接 FinMind 真實法人數據。因需聯網查詢，掃描速度較慢，請耐心等候。")
 
 # --- 2. 側邊欄：策略控制台 ---
 st.sidebar.header("🎯 請選擇操盤策略")
@@ -20,11 +21,42 @@ strategy = st.sidebar.radio(
 st.sidebar.markdown("---")
 ai_filter = st.sidebar.checkbox("只顯示 AI 供應鏈", value=False)
 if ai_filter:
-    st.sidebar.caption("✅ 已開啟濾鏡：將從 200 檔中篩選出 AI 核心族群。")
+    st.sidebar.caption("✅ 已開啟濾鏡：將從 200 檔中篩選出 AI、散熱、機器人等核心族群。")
 
 vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.0, 1.0, 0.1)
 
-# --- 3. 內建熱門清單 (200 檔真實標的) ---
+# --- 3. 籌碼數據引擎 (FinMind) ---
+@st.cache_data(ttl=3600) # 設定快取 1 小時，避免重複抓取
+def get_chip_data(stock_id):
+    try:
+        api = DataLoader()
+        # 抓取最近 5 天的數據
+        start_date = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+        
+        # 抓取三大法人買賣超
+        df_inst = api.taiwan_stock_institutional_investors(
+            stock_id=stock_id, 
+            start_date=start_date
+        )
+        
+        if df_inst.empty:
+            return 0, 0, "無數據"
+
+        # 取最近一天的數據
+        latest = df_inst[df_inst['date'] == df_inst['date'].max()]
+        if latest.empty:
+            return 0, 0, "無數據"
+
+        # 計算外資與投信買賣超 (Foreign_Investor, Investment_Trust)
+        # FinMind 欄位名稱可能為 'Foreign_Investor_Diff' 等
+        foreign_buy = latest[latest['name'] == 'Foreign_Investor']['buy'].sum() - latest[latest['name'] == 'Foreign_Investor']['sell'].sum()
+        trust_buy = latest[latest['name'] == 'Investment_Trust']['buy'].sum() - latest[latest['name'] == 'Investment_Trust']['sell'].sum()
+        
+        return foreign_buy, trust_buy, "有數據"
+    except Exception as e:
+        return 0, 0, "連線失敗"
+
+# --- 4. 內建熱門清單 ---
 @st.cache_data
 def get_tw_stock_list():
     top_stocks = [
@@ -153,25 +185,46 @@ def calculate_indicators(df):
     df['D'] = df['K'].ewm(com=2).mean()
     return df
 
-# --- 🎯 核心：動態原因生成函數 ---
-def get_analysis_reason(strategy, change_pct, vol_ratio, price, ma5, ma60):
+# --- 🎯 V13.0 核心：真實籌碼判讀引擎 (FinMind 整合) ---
+def get_chip_analysis(strategy, change_pct, vol_ratio, price, ma5, ma60, foreign_buy, trust_buy):
+    
+    # 基本籌碼判斷邏輯
+    is_foreign_buy = foreign_buy > 0
+    is_trust_buy = trust_buy > 0
+    is_foreign_sell = foreign_buy < 0
+    is_trust_sell = trust_buy < 0
+    
+    # 策略 1: 強勢噴出
     if strategy == "🔥 強勢噴出 (追高動能)":
-        if vol_ratio > 2.0: return "🔥 爆量攻擊/籌碼換手"
-        return "📈 價漲量增/強勢動能"
+        if is_foreign_buy and is_trust_buy:
+            return "🚀 雙主力鎖籌 (土洋合擊)"
+        if is_trust_buy:
+            return "🚀 投信點火 (作帳行情)"
+        if is_foreign_buy:
+            return "📈 外資回補 (波段買盤)"
+        return "📈 帶量攻擊 (主力動能)"
 
+    # 策略 2: 波段多頭
     elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
-        # 如果今日大跌 > 2%，即使趨勢向上，也要警告
-        if change_pct < -2.0: return "📉 回測支撐/乖離修正" 
-        # 如果今日大漲且量增
-        if vol_ratio > 1.5 and change_pct > 2.0: return "🚀 帶量發動/主升段"
-        # 價格跌破短均線
-        if price < ma5: return "⚠️ 跌破五日線/觀察"
-        return "🛡️ 多頭排列/穩健續強"
+        if change_pct < 0 and is_trust_buy and is_foreign_sell:
+            return "📉 法人換手 (外資丟、投信撿)"
+        if change_pct < 0 and is_foreign_buy:
+            return "🛡️ 外資護盤 (低接買盤)"
+        if is_trust_buy:
+            return "💎 投信認養 (波段持有)"
+        if is_foreign_sell and is_trust_sell:
+            return "⚠️ 法人雙賣 (短線修正)"
+        return "🛡️ 多頭排列 (穩健續強)"
 
+    # 策略 3: 低檔轉折
     elif strategy == "🎣 低檔轉折 (抄底反彈)":
-        if vol_ratio > 1.5: return "✨ 爆量金叉/底部確認"
-        if change_pct < 0: return "⚠️ 金叉但收黑/需觀察"
-        return "✨ KD金叉/跌深反彈"
+        if is_trust_buy:
+            return "✨ 投信抄底 (低檔佈局)"
+        if is_foreign_buy:
+            return "✨ 外資低接 (跌深反彈)"
+        if is_foreign_sell and is_trust_sell:
+            return "⚠️ 散戶接盤 (法人未進場)"
+        return "✨ 技術面反彈 (觀望籌碼)"
     
     return "符合策略條件"
 
@@ -184,7 +237,7 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
         st.info(f"🤖 AI 聚焦模式：正在分析 {len(working_df)} 檔核心供應鏈...")
     else:
         working_df = stock_df.copy()
-        st.info(f"📊 全市場模式：正在掃描 200 檔指標股，請耐心等候...")
+        st.info(f"📊 全市場模式：正在掃描 200 檔指標股 (含 FinMind 真實籌碼)...")
 
     working_df = working_df.reset_index(drop=True)
     total = len(working_df)
@@ -198,11 +251,15 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
         
         for i, row in working_df.iterrows():
             code, name, tag = row['代號'], row['名稱'], row['Tag']
-            status_text.text(f"🔍 掃描中 ({i+1}/{total})：[{code} {name}]")
+            status_text.text(f"🔍 掃描中 ({i+1}/{total})：[{code} {name}] - 查詢籌碼中...")
             
             try:
+                # 1. 抓價量 (Yahoo)
                 ticker = yf.Ticker(f"{code}.TW")
                 data = ticker.history(period="6mo")
+                
+                # 2. 抓籌碼 (FinMind) -> 這裡會比較慢
+                foreign_buy, trust_buy, chip_status = get_chip_data(code)
 
                 if not data.empty and len(data) >= 60:
                     data = calculate_indicators(data)
@@ -221,7 +278,7 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
                     
                     is_match = False
                     
-                    # 策略邏輯 (含滑桿限制)
+                    # === 策略核心判斷 (含滑桿限制) ===
                     if strategy == "🔥 強勢噴出 (追高動能)":
                         if change_pct > 1.0 and price_now > ma5 and vol_ratio >= vol_threshold:
                             is_match = True
@@ -233,21 +290,27 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
                             is_match = True
 
                     if is_match:
-                        # 呼叫動態原因生成函數
-                        dynamic_reason = get_analysis_reason(strategy, change_pct, vol_ratio, price_now, ma5, ma60)
+                        # 呼叫 V13.0 真實籌碼解讀引擎
+                        chip_reason = get_chip_analysis(strategy, change_pct, vol_ratio, price_now, ma5, ma60, foreign_buy, trust_buy)
                         
                         display_tag = tag.replace("AI-", "🔥 ") if "AI-" in tag else (tag if tag else "一般")
+                        
+                        # 格式化籌碼顯示
+                        f_str = f"外資:{int(foreign_buy/1000)}k" if abs(foreign_buy) > 0 else "外資:-"
+                        t_str = f"投信:{int(trust_buy/1000)}k" if abs(trust_buy) > 0 else "投信:-"
+                        
                         results.append({
                             "代號": code, "名稱": name, "屬性": display_tag, 
+                            "籌碼戰況": f"{f_str} / {t_str}",
                             "即時價格": f"{price_now:.2f}", 
-                            "昨日收盤": f"{price_yesterday:.2f}", 
                             "今日漲幅": f"{change_pct:.1f}%", 
                             "量比": f"{vol_ratio:.1f}倍", 
-                            "原因": dynamic_reason  # 使用動態原因
+                            "原因": chip_reason # 顯示真實籌碼解讀
                         })
                 
-                time.sleep(0.05) 
-            except:
+                # 這裡不需要 sleep 太多，因為 FinMind 請求本身就會耗時
+                time.sleep(0.01) 
+            except Exception as e:
                 pass 
 
             progress_bar.progress((i + 1) / total)
@@ -256,6 +319,6 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
         if results:
             df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
             st.success(f"🎊 發現 {len(results)} 檔符合策略標的！")
-            st.dataframe(df_res[["代號", "名稱", "屬性", "即時價格", "昨日收盤", "今日漲幅", "量比", "原因"]], use_container_width=True)
+            st.dataframe(df_res[["代號", "名稱", "屬性", "籌碼戰況", "即時價格", "今日漲幅", "量比", "原因"]], use_container_width=True)
         else:
-            st.warning(f"目前市場符合條件標的較少 (設定量比門檻：{vol_threshold}倍)。建議調整量能過濾或更換策略。")
+            st.warning(f"目前市場符合條件標的較少 (設定量比門檻：{vol_threshold}倍)。")
