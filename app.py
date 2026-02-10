@@ -7,9 +7,9 @@ from FinMind.data import DataLoader
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強戰情室", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強戰情室 (V13.7 數據校正終極版)")
+st.title("📈 台股 200 強戰情室 (V13.8 白話翻譯版)")
 st.write(f"系統執行時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("更新：已修正 FinMind 單位問題 (股數轉張數)，確保智原顯示為 2516 張。")
+st.caption("更新：新增「白話解讀」欄位，讓您秒懂法人意圖！")
 
 # ==========================================
 # 🔑【您的專屬 Token 已嵌入】
@@ -39,23 +39,20 @@ def get_chip_data(stock_id):
         if API_TOKEN:
             api.login_by_token(api_token=API_TOKEN)
 
-        # 抓取最近 5 天數據以確保包含最新交易日
         start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
         df_inst = api.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date)
         
         if df_inst.empty: return 0, 0
         
-        # 僅取「最新日期」的數據
         latest_date = df_inst['date'].max()
         latest_data = df_inst[df_inst['date'] == latest_date]
         
         if latest_data.empty: return 0, 0
 
-        # --- 核心修正：計算買賣差額並除以 1000 (換算成張數) ---
-        # FinMind 回傳的是「股數」，必須 // 1000 才會變成「張數」
         foreign_net_shares = latest_data[latest_data['name'] == 'Foreign_Investor']['buy'].sum() - latest_data[latest_data['name'] == 'Foreign_Investor']['sell'].sum()
         trust_net_shares = latest_data[latest_data['name'] == 'Investment_Trust']['buy'].sum() - latest_data[latest_data['name'] == 'Investment_Trust']['sell'].sum()
         
+        # 修正單位為「張」
         foreign_lots = int(foreign_net_shares // 1000)
         trust_lots = int(trust_net_shares // 1000)
         
@@ -63,7 +60,7 @@ def get_chip_data(stock_id):
     except:
         return 0, 0
 
-# --- 4. 內建熱門清單 (完整 200 檔 + 語法修復) ---
+# --- 4. 內建熱門清單 (完整 200 檔) ---
 @st.cache_data
 def get_tw_stock_list():
     top_stocks = [
@@ -190,28 +187,27 @@ def calculate_indicators(df):
     df['D'] = df['K'].ewm(com=2).mean()
     return df
 
-# --- 🎯 精確籌碼判定邏輯 (含 50 張門檻 + 單位修正後) ---
+# --- 🎯 白話翻譯引擎 (回傳兩個值：專業術語, 白話文) ---
 def get_chip_analysis(strategy, change_pct, foreign_buy, trust_buy):
-    # 因為現在單位已修正為「張」，所以 50 就是 50 張 (不用擔心被放大)
     is_f_valid = foreign_buy > 50
     is_t_valid = trust_buy > 50
     
     if strategy == "🔥 強勢噴出 (追高動能)":
-        if is_f_valid and is_t_valid: return "🚀 雙主力鎖籌 (土洋合擊)"
-        if is_t_valid: return "🚀 投信點火 (作帳行情)"
-        if is_f_valid: return "📈 外資回補 (波段買盤)"
-        return "📈 帶量攻擊 (主力動能)"
+        if is_f_valid and is_t_valid: return "🚀 雙主力鎖籌 (土洋合擊)", "外資投信一起買，股價最容易噴出！"
+        if is_t_valid: return "🚀 投信點火 (作帳行情)", "投信剛開始買，可能是新飆股。"
+        if is_f_valid: return "📈 外資回補 (波段買盤)", "外資大買，股價容易繼續漲。"
+        return "📈 帶量攻擊 (主力動能)", "雖無法人大買，但有大戶在拉抬。"
 
     elif strategy == "🛡️ 波段多頭 (穩健趨勢)":
-        if change_pct < 0 and is_t_valid and foreign_buy < -50: return "📉 法人換手 (外資丟、投信撿)"
-        if is_t_valid: return "💎 投信認養 (波段持有)"
-        return "🛡️ 多頭排列 (穩健續強)"
+        if change_pct < 0 and is_t_valid and foreign_buy < -50: return "📉 法人換手 (外資丟、投信撿)", "外資賣股但投信在接，股價有支撐。"
+        if is_t_valid: return "💎 投信認養 (波段持有)", "投信一直買，適合抱著賺波段。"
+        return "🛡️ 多頭排列 (穩健續強)", "趨勢向上，股價穩穩漲。"
 
     elif strategy == "🎣 低檔轉折 (抄底反彈)":
-        if is_t_valid: return "✨ 投信抄底 (低檔佈局)"
-        return "✨ 技術面反彈 (觀望籌碼)"
+        if is_t_valid: return "✨ 投信抄底 (低檔佈局)", "股價跌深，投信開始撿便宜了。"
+        return "✨ 技術面反彈 (觀望籌碼)", "跌深反彈，但大戶還沒明顯進場。"
     
-    return "符合策略條件"
+    return "符合策略條件", "符合篩選條件"
 
 # 🚀 執行主程式
 if st.button("🚀 執行操盤手完整掃描", type="primary"):
@@ -232,7 +228,6 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
         try:
             ticker = yf.Ticker(f"{code}.TW")
             data = ticker.history(period="6mo")
-            # 取得修正後(張數)的籌碼數據
             f_buy, t_buy = get_chip_data(code) 
 
             if not data.empty and len(data) >= 60:
@@ -249,7 +244,8 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
                 elif strategy == "🎣 低檔轉折 (抄底反彈)" and data['K'].iloc[-1] > data['D'].iloc[-1] and data['K'].iloc[-2] < data['D'].iloc[-2] and vol_ratio >= vol_threshold: is_match = True
 
                 if is_match:
-                    chip_reason = get_chip_analysis(strategy, change_pct, f_buy, t_buy)
+                    # 取得原因和白話文
+                    reason, explanation = get_chip_analysis(strategy, change_pct, f_buy, t_buy)
                     
                     results.append({
                         "代號": code, "名稱": name, "屬性": tag, 
@@ -258,7 +254,8 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
                         "昨日收盤價格": f"{p_yest:.2f}", 
                         "今日漲幅": f"{change_pct:.1f}%", 
                         "量比": f"{vol_ratio:.1f}倍", 
-                        "原因": chip_reason
+                        "原因": reason,
+                        "白話解讀": explanation  # 新增欄位
                     })
             time.sleep(0.01)
         except: pass
@@ -267,6 +264,7 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
     status_text.text("✅ 全數掃描完畢！")
     if results:
         df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
-        st.dataframe(df_res[["代號", "名稱", "屬性", "籌碼戰況", "即時價格", "昨日收盤價格", "今日漲幅", "量比", "原因"]], use_container_width=True)
+        # 顯示所有欄位，包含白話解讀
+        st.dataframe(df_res[["代號", "名稱", "屬性", "籌碼戰況", "即時價格", "昨日收盤價格", "今日漲幅", "量比", "原因", "白話解讀"]], use_container_width=True)
     else:
         st.warning("⚠️ 本次掃描沒有發現符合條件的股票，建議調整策略或量能門檻。")
