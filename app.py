@@ -7,9 +7,9 @@ from FinMind.data import DataLoader
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強戰情室", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強戰情室 (V13.4 專業終極版)")
+st.title("📈 台股 200 強戰情室 (V13.5 語法修復版)")
 st.write(f"系統執行時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("更新：已嵌入您的專屬 API Token，掃描穩定度提升至每小時 600 次。")
+st.caption("更新：已修復潤泰新 (9945) 的語法錯誤，系統恢復正常運作。")
 
 # ==========================================
 # 🔑【您的專屬 Token 已自動填入】
@@ -36,7 +36,6 @@ vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.
 def get_chip_data(stock_id):
     try:
         api = DataLoader()
-        # 使用嵌入的 Token 登入以解鎖流量
         if API_TOKEN:
             api.login_by_token(api_token=API_TOKEN)
 
@@ -47,7 +46,6 @@ def get_chip_data(stock_id):
         latest = df_inst[df_inst['date'] == df_inst['date'].max()]
         if latest.empty: return 0, 0
 
-        # 計算外資與投信買賣超真實張數
         foreign_buy = latest[latest['name'] == 'Foreign_Investor']['buy'].sum() - latest[latest['name'] == 'Foreign_Investor']['sell'].sum()
         trust_buy = latest[latest['name'] == 'Investment_Trust']['buy'].sum() - latest[latest['name'] == 'Investment_Trust']['sell'].sum()
         
@@ -163,7 +161,7 @@ def get_tw_stock_list():
         {"代號": "2727", "名稱": "王品", "Tag": "觀光"}, {"代號": "2498", "名稱": "宏達電", "Tag": "VR"},
         {"代號": "5522", "名稱": "遠雄", "Tag": "營建"}, {"代號": "2542", "名稱": "興富發", "Tag": "營建"},
         {"代號": "2501", "名稱": "國建", "Tag": "營建"}, {"代號": "2515", "名稱": "中工", "Tag": "營建"},
-        {"代號": "9945", "潤泰新", "Tag": "營建"}, {"代號": "2548", "名稱": "華固", "Tag": "營建"},
+        {"代號": "9945", "名稱": "潤泰新", "Tag": "營建"}, {"代號": "2548", "名稱": "華固", "Tag": "營建"},
         {"代號": "3023", "名稱": "信邦", "Tag": "電子"}, {"代號": "6282", "名稱": "康舒", "Tag": "電源"},
         {"代號": "6182", "名稱": "合晶", "Tag": "半導體"}, {"代號": "6257", "名稱": "矽格", "Tag": "封測"},
         {"代號": "3006", "名稱": "晶豪科", "Tag": "記憶體"}, {"代號": "8150", "名稱": "南茂", "Tag": "封測"},
@@ -257,7 +255,6 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
     status_text.text("✅ 全數掃描完畢！")
     if results:
         df_res = pd.DataFrame(results).sort_values(by="今日漲幅", ascending=False, key=lambda x: x.str.strip('%').astype(float))
-        # 顯示欄位包含昨日收盤價
         st.dataframe(df_res[["代號", "名稱", "屬性", "籌碼戰況", "即時價格", "昨日收盤價格", "今日漲幅", "量比", "原因"]], use_container_width=True)
     else:
-        st.warning("⚠️ 本次掃描沒有發現符合條件的股票。")
+        st.warning("⚠️ 本次掃描沒有發現符合條件的股票，建議調整策略或量能門檻。")
