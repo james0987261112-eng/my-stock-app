@@ -7,12 +7,12 @@ from FinMind.data import DataLoader
 
 # --- 1. 網頁基本設定 ---
 st.set_page_config(page_title="台股 200 強戰情室", page_icon="📈", layout="wide")
-st.title("📈 台股 200 強戰情室 (V13.5 語法修復版)")
+st.title("📈 台股 200 強戰情室 (V13.7 數據校正終極版)")
 st.write(f"系統執行時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("更新：已修復潤泰新 (9945) 的語法錯誤，系統恢復正常運作。")
+st.caption("更新：已修正 FinMind 單位問題 (股數轉張數)，確保智原顯示為 2516 張。")
 
 # ==========================================
-# 🔑【您的專屬 Token 已自動填入】
+# 🔑【您的專屬 Token 已嵌入】
 # ==========================================
 API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0xMSAwMDoyMDo1MyIsInVzZXJfaWQiOiJqYW1lczYwMDAxIiwiZW1haWwiOiJqYW1lczA5ODcyNjExMTJAZ21haWwuY29tIiwiaXAiOiIxMTEuMjQyLjI2LjEzOSJ9.3XPxqCjttLPIGYvPTNDZX6u5A10-VxHnqBeT9mJGmq8"
 # ==========================================
@@ -31,7 +31,7 @@ if ai_filter:
 
 vol_threshold = st.sidebar.slider("量能過濾 (今日量/5日均量)", 0.5, 3.0, 1.0, 0.1)
 
-# --- 3. 籌碼數據引擎 (FinMind + Token) ---
+# --- 3. 籌碼數據引擎 (FinMind + 單位修正) ---
 @st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
@@ -39,21 +39,31 @@ def get_chip_data(stock_id):
         if API_TOKEN:
             api.login_by_token(api_token=API_TOKEN)
 
-        start_date = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+        # 抓取最近 5 天數據以確保包含最新交易日
+        start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
         df_inst = api.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date)
         
         if df_inst.empty: return 0, 0
-        latest = df_inst[df_inst['date'] == df_inst['date'].max()]
-        if latest.empty: return 0, 0
-
-        foreign_buy = latest[latest['name'] == 'Foreign_Investor']['buy'].sum() - latest[latest['name'] == 'Foreign_Investor']['sell'].sum()
-        trust_buy = latest[latest['name'] == 'Investment_Trust']['buy'].sum() - latest[latest['name'] == 'Investment_Trust']['sell'].sum()
         
-        return foreign_buy, trust_buy
+        # 僅取「最新日期」的數據
+        latest_date = df_inst['date'].max()
+        latest_data = df_inst[df_inst['date'] == latest_date]
+        
+        if latest_data.empty: return 0, 0
+
+        # --- 核心修正：計算買賣差額並除以 1000 (換算成張數) ---
+        # FinMind 回傳的是「股數」，必須 // 1000 才會變成「張數」
+        foreign_net_shares = latest_data[latest_data['name'] == 'Foreign_Investor']['buy'].sum() - latest_data[latest_data['name'] == 'Foreign_Investor']['sell'].sum()
+        trust_net_shares = latest_data[latest_data['name'] == 'Investment_Trust']['buy'].sum() - latest_data[latest_data['name'] == 'Investment_Trust']['sell'].sum()
+        
+        foreign_lots = int(foreign_net_shares // 1000)
+        trust_lots = int(trust_net_shares // 1000)
+        
+        return foreign_lots, trust_lots
     except:
         return 0, 0
 
-# --- 4. 內建熱門清單 (完整 200 檔) ---
+# --- 4. 內建熱門清單 (完整 200 檔 + 語法修復) ---
 @st.cache_data
 def get_tw_stock_list():
     top_stocks = [
@@ -180,8 +190,9 @@ def calculate_indicators(df):
     df['D'] = df['K'].ewm(com=2).mean()
     return df
 
-# --- 🎯 精確籌碼判定邏輯 (含 50 張門檻) ---
+# --- 🎯 精確籌碼判定邏輯 (含 50 張門檻 + 單位修正後) ---
 def get_chip_analysis(strategy, change_pct, foreign_buy, trust_buy):
+    # 因為現在單位已修正為「張」，所以 50 就是 50 張 (不用擔心被放大)
     is_f_valid = foreign_buy > 50
     is_t_valid = trust_buy > 50
     
@@ -221,6 +232,7 @@ if st.button("🚀 執行操盤手完整掃描", type="primary"):
         try:
             ticker = yf.Ticker(f"{code}.TW")
             data = ticker.history(period="6mo")
+            # 取得修正後(張數)的籌碼數據
             f_buy, t_buy = get_chip_data(code) 
 
             if not data.empty and len(data) >= 60:
